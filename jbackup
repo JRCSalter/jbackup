@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Stopping dropbox so it doesn't mess anything around while syncing everything
+# else.
+killall dropbox
+
+# Preparing logging variables
+space="                             ";
+log="/mnt/03-main/backup_log";
+
+# Starting the log
+echo `date` " Backup started" >> $log
+echo "$space Mounting Dropbox/encrypted" >> $log
+
+# Mount the encrypted drive for Dropbox
+# The decrypts the drive allowing the script to write unencrypted files to be 
+# encrypted later
+# We want to check the drive is mounted first
+# Thepassword file should contain the following information:
+# passphrase_passwd[PASSWORD]
+password_file="/home/$USER/password"
+mountpoint -q /mnt/dropbox && mount \
+  -t ecryptfs \
+  -o key=passphrase:passphrase_passwd_file=$password_file \
+  -o ecryptfs_enable_filename_crypto=n \
+  -o ecryptfs_cipher=aes \
+  -o ecryptfs_key_bytes=32 \
+  -o ecryptfs_passthrough /home/$USER/Dropbox/encrypted /home/$USER/Dropbox/encrypted \
+  && echo "$space Dropbox/encrypted mounted" >> $log
+
+# The following backs up any obsidian notes that are left on my working machine
+# I could probably get a more elegant way of doing this with symlinks and proper
+# organisation, but for now it works
+# Synching Obsidian
+sudo rsync -vrulopgt --partial --progress --chmod=755 --chown=jrcs:jrcs \
+  /usr/share/obsidian/Professional/.obsidian \
+  /mnt/03-main/documents/backups/00-notes/Professional/
+
+sudo rsync -vrulopgt --partial --progress --chmod=755 --chown=jrcsalter:jrcsalter \
+  /usr/share/obsidian/Personal/.obsidian \
+  /mnt/03-main/documents/backups/00-notes/Personal/
+
+sudo rsync -vrulopgt --partial --progress --chmod=755 --chown=jrcsalter:jrcsalter \
+  /usr/share/obsidian/Obsidian\ Vault/.obsidian \
+  /mnt/03-main/documents/backups/00-notes/Obsidian\ Vault/
+
+echo "$space Syncing from Shared Drive" >> $log
+
+# The following is to allow me to share data from Windows to Linux. All my Linux
+# drives are Ext4, and Windows doesn't support that, so this also sets ownership
+# and basic permissions.
+# Does not delete anything from the destination drive
+rsync -vrulopgt --partial --progress --chmod=755 --chown=jrcs:jrcs \
+  /mnt/shared_1/video \
+  /mnt/03-main/documents
+
+rsync -vrulopgt --partial --progress --chmod=755 --chown=jrcs:jrcs \
+  /mnt/shared_1/writing \
+  /mnt/03-main/documents
+
+rsync -vrulopgt --partial --progress --chmod=755 --chown=jrcs:jrcs \
+  /mnt/shared_1/pictures \
+  /mnt/03-main/documents
+
+echo "$space Changing permissions on shared files" >> $log
+
+# Changes permissions for anything in the directories synced to by the above
+# command
+find /mnt/03-main/documents/06-video -type f -exec chmod -v 644 {} \;
+find /mnt/03-main/documents/21-writing -type f -exec chmod -v 644 {} \;
+
+echo "$space Syncing to Dropbox" >> $log
+
+# Syncing to Dropbox. Changes all permissions to rwx, and owner and group to
+# jrcsalter so that Dropbox can do what it needs to do
+# Also deletes anything on the destination drive that has been deleted on the
+# sending drive
+
+if [[ $(findmnt -M "/mnt/dropbox") ]]; then
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/documents \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/jrcs \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/jrcsalter \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/work \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/notes \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/notes_html \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/notes-jrcsalter \
+  /mnt/dropbox/Dropbox/encrypted
+
+rsync -vrulopgt --partial --progress --delete \
+  --chmod=777 \
+  --chown=jrcsalter:jrcsalter \
+  /mnt/03-main/notes-jrcsalter_html \
+  /mnt/dropbox/Dropbox/encrypted
+fi
+
+echo "$space Syncing to onsite backup" >> $log
+
+# Syncing to onsite backup. Keeping all permissions and ownerships.
+# Also deletes anything on the destination drive that has been deleted on the
+# sending drive
+rsync -vrulopgt --partial --progress --delete \
+  /mnt/03-main/documents \
+  /mnt/mass_1-backup
+
+rsync -vrulopgt --partial --progress --delete \
+  /mnt/03-main/jrcs \
+  /mnt/mass_1-backup
+
+rsync -vrulopgt --partial --progress --delete \
+  /mnt/03-main/jrcsalter \
+  /mnt/mass_1-backup
+
+rsync -vrulopgt --partial --progress --delete \
+  /mnt/03-main/work \
+  /mnt/mass_1-backup
+
+rsync -vrulopgt --partial --progress --delete \
+  /mnt/03-main/notes \
+  /mnt/mass_1-backup
+
+echo "$space Unmounting Dropbox/encrypted" >> $log
+
+# Unmount the encrypted drive for Dropbox
+# This now encrypts dropbox ready to sync.
+mountpoint -q /mnt/dropbox && keyctl unlink
+mountpoint -q /mnt/dropbox && umount /home/jrcsalter/Dropbox/encrypted
+
+echo "$space Backup complete on `date`" >> $log
